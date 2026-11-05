@@ -1,4 +1,4 @@
 .env
 ._*
 .venv
-bkp
+bkp*
