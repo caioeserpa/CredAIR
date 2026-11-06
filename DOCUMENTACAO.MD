@@ -10,15 +10,12 @@ Documentação do notebook `notebook.ipynb`, organizada **passo a passo conforme
  
 1. [Visão geral](#1-visão-geral)
 2. [Como executar](#2-como-executar)
-3. [Estrutura sugerida do repositório](#3-estrutura-sugerida-do-repositório)
+3. [Estrutura do repositório](#3-estrutura-do-repositório)
 4. [Regras de negócio e premissas](#4-regras-de-negócio-e-premissas)
 5. [Documentação passo a passo (Seções 1 a 8 do README)](#5-documentação-passo-a-passo)
-6. [Histórico: o que mudou em relação à primeira versão](#6-histórico-o-que-mudou-em-relação-à-primeira-versão)
-7. [Resultados](#7-resultados)
-8. [Limitações e cuidados para uso real](#8-limitações-e-cuidados-para-uso-real)
-9. [Checklist de entrega e roteiro da apresentação](#9-checklist-de-entrega-e-roteiro-da-apresentação)
-10. [Prática de Git: commits convencionais](#10-prática-de-git-commits-convencionais)
-11. [Glossário](#11-glossário)
+6. [Resultados](#6-resultados)
+7. [Glossário](#10-glossário)
+
 ---
  
 ## 1. Visão geral
@@ -37,9 +34,9 @@ Documentação do notebook `notebook.ipynb`, organizada **passo a passo conforme
  
 ```
 Dados brutos → Entendimento → EDA (incl. outliers) → Limpeza → EDA das relações (dados limpos)
-→ Engenharia de atributos → Split treino/teste → Seleção de variáveis (só treino)
-→ Regressão Logística → Teste de sensibilidade (só treino) → Baselines → Avaliação no teste
-→ Interpretação → Conclusão
+→ Engenharia de atributos → Split treino/teste → Diagnóstico de colinearidade (VIF)
+→ Seleção de variáveis (só treino: IV + Boruta) → Regressão Logística com regularização L1/L2
+→ Baselines de referência → Avaliação no teste → Interpretação de coeficientes e corte de negócio → Conclusão
 ```
  
 ---
@@ -62,10 +59,11 @@ O notebook segue a numeração do README (Seções 1 a 8). Como a análise das r
 ├── README.md                  # enunciado do desafio
 ├── DOCUMENTACAO.md            # este documento
 ├── requirements.txt
-├── .env.example               # PATH_DATA=data/credito.csv (não versionar o .env real)
+├── .env.example               # PATH_DATA=data/credito.csv
 ├── data/
 │   └── credito.csv
-└── notebook.ipynb            
+└── notebooks/
+    └── notebook.ipynb            
 ```
  
 ---
@@ -87,24 +85,22 @@ As regras abaixo guiam a limpeza e o uso do modelo. As marcadas como **premissa*
 | R9 | A avaliação usa só dados que não participaram do treino; nenhuma decisão guiada pelo alvo usa o teste | Enunciado | Seções 5 a 7 |
 | R10 | O modelo deve ser comparado com uma referência simples | Enunciado | Seção 7.1 |
 | R11 | Lucro de R$ 800 por bom pagador aprovado e custo de R$ 4.000 por inadimplente aprovado | **Hipotético**, não são dados da CredAIR | Seção 7.3 |
-| R12 | Variáveis de localização fina (`estado`) não entram no modelo, para reduzir o risco de discriminação | Boa prática / **premissa** | Seção 5 |
+| R12 | Variáveis categóricas são filtradas por poder preditivo (IV ≥ 0,02 no treino); `estado` atinge o critério e entra no modelo, enquanto `regiao`, `finalidade` e `escolaridade` são descartadas por baixo IV. O uso de `estado` é registrado como ponto de atenção para mitigação de viés discriminatório | Critério de seleção / Governança | Seções 5 e 7 |
 | R13 | Outliers que representam clientes reais (cauda alta de renda e valor, extremos de score) são **mantidos**; só valores impossíveis são tratados. Os tetos em 850 (score) e 50.000 (valor) são censura e ficam registrados como limitação | **Decisão** | Seções 2 e 3 |
-| R14 | Uma variante do modelo (renda em log, caudas limitadas, prazo em faixas) só substitui o modelo base se ganhar mais que **1 desvio-padrão da PR AUC** entre os folds; o teste não entra nessa decisão | **Decisão** | Seção 6.1 |
+| R14 | Regularização L1/L2 é otimizada por busca em grade com validação cruzada estratificada (5 folds no treino), selecionando L1 (Lasso) para encolher coeficientes e lidar com variáveis colineares | **Decisão** | Seção 6 |
  
 ---
  
 ## 5. Documentação passo a passo
  
-Legenda de status: ✅ atendido · ⚠️ atendido com ressalva
- 
 ### Seção 1: Entendimento do problema
  
-| Requisito do README | O que foi feito | Status |
-|---|---|---|
-| Identificar a variável resposta | `inadimplente` | ✅ |
-| Explicar o que ela representa | Binária; 1 = a proposta resultou em inadimplência após o acompanhamento; observada *depois* da concessão, por isso precisa ser prevista para propostas novas | ✅ |
-| Caracterizar o problema de ML | Aprendizado supervisionado de classificação binária; o modelo estima P(inadimplente = 1 \| x) | ✅ |
-| Justificar a classificação | Alvo categórico de duas classes; decisão de negócio discreta (aprovar, negar ou revisar); a Regressão Logística devolve probabilidades interpretáveis | ✅ |
+| Requisito do README | O que foi feito | 
+|---|---|
+| Identificar a variável resposta | `inadimplente` | 
+| Explicar o que ela representa | Binária; 1 = a proposta resultou em inadimplência após o acompanhamento; observada *depois* da concessão, por isso precisa ser prevista para propostas novas | 
+| Caracterizar o problema de ML | Aprendizado supervisionado de classificação binária; o modelo estima P(inadimplente = 1 \| x) | 
+| Justificar a classificação | Alvo categórico de duas classes; decisão de negócio discreta (aprovar, negar ou revisar); a Regressão Logística devolve probabilidades interpretáveis | 
  
 **Consequências registradas:** a classe positiva é minoritária (~34%), então a acurácia sozinha engana e usamos várias métricas; é obrigatório comparar com um baseline.
  
@@ -114,12 +110,12 @@ Legenda de status: ✅ atendido · ⚠️ atendido com ressalva
  
 A análise tem duas partes: **2.1 a 2.4** olham os **dados brutos** (características, qualidade, alvo e outliers) e a **Seção 2b**, depois da limpeza, investiga as **relações com a inadimplência**. As relações ficam para depois da limpeza porque, nos dados brutos, os valores impossíveis distorceriam as conclusões.
  
-| Requisito | O que foi feito | Status |
-|---|---|---|
-| Características dos dados | `info()`, `describe()`, valores distintos, mínimo e máximo, contagem de nulos e de duplicadas, histogramas | ✅ |
-| Distribuição da variável resposta | ~34% de inadimplentes, com gráfico de barras | ✅ |
-| Relações com a inadimplência | Spearman, boxplots por classe, **medianas por classe**, taxa de inadimplência por faixa **com número de clientes e intervalo de confiança de 95%** | ✅ |
-| Padrões relevantes | Inadimplência mais ligada à **capacidade de pagamento**; perfil demográfico com relação fraca | ✅ |
+| Requisito | O que foi feito | 
+|---|----|
+| Características dos dados | `info()`, `describe()`, valores distintos, mínimo e máximo, contagem de nulos e de duplicadas, histogramas |
+| Distribuição da variável resposta | ~34% de inadimplentes, com gráfico de barras |
+| Relações com a inadimplência | Spearman, boxplots por classe, **medianas por classe**, taxa de inadimplência por faixa **com número de clientes e intervalo de confiança de 95%** |
+| Padrões relevantes | Inadimplência mais ligada à **capacidade de pagamento**; perfil demográfico com relação fraca  |
  
 **Achados que sinalizaram problemas de qualidade (insumo da Seção 3):** `idade` com máximo em 750, `renda_mensal` com mínimo muito baixo, `estado` com 85 valores distintos para 27 UFs, tempo de emprego maior que a idade.
  
@@ -136,8 +132,6 @@ Os pontos fora da caixa foram separados em **três grupos**, porque nem todo out
  
 **Limite do boxplot:** ele só enxerga valores isolados. A inconsistência mais pesada (tempo de emprego incompatível com a idade) só aparece **cruzando duas variáveis**, por isso a regra R5 da Seção 3 atinge ~15% da base, e não os poucos pontos que o gráfico mostra.
  
-> O primeiro boxplot tinha um painel extra plotando `inadimplente` contra ela mesma. Foi corrigido tirando o alvo da lista de variáveis numéricas.
- 
 #### 2b. Relações com a inadimplência (dados limpos)
  
 **Boxplots após a limpeza.**
@@ -149,7 +143,7 @@ Os pontos fora da caixa foram separados em **três grupos**, porque nem todo out
 | `renda_mensal` | Mínimo de R$ 100 a 550 | Mínimo em torno de R$ 800 |
 | Demais | Sem erros | Inalteradas |
  
-Os outliers que sobram (renda e valor com cauda alta, score nos extremos) são legítimos. Dois cuidados: (1) os dois pontos de renda perto de 43–45 mil ficam a ~10 desvios-padrão da média e pesam em um modelo linear com variáveis padronizadas, o que motiva o teste de sensibilidade da Seção 6.1; (2) os tetos em 850 e 50.000 são censura.
+Os outliers que sobram (renda e valor com cauda alta, score nos extremos) são legítimos. Dois cuidados: (1) os dois pontos de renda perto de 43–45 mil ficam a ~10 desvios-padrão da média e pesam em um modelo linear com variáveis padronizadas, o que é mitigado pela regularização L1 (Lasso) adotada na modelagem; (2) os tetos em 850 e 50.000 são censura.
  
 **Medianas por classe** (valores lidos do gráfico, aproximados; a tabela do notebook traz os valores exatos):
  
@@ -210,12 +204,12 @@ Os outliers que sobram (renda e valor com cauda alta, score nos extremos) são l
  
 | Variável | Construção | O que representa | Relação esperada | Uso |
 |---|---|---|---|---|
-| `parcela_estimada` | `valor_solicitado / prazo_meses` | Parcela mensal aproximada, **sem juros** | Parcela maior pesa mais no orçamento | Candidata (descartada na Seção 5 por redundância) |
-| **`comprometimento_renda`** | `parcela_estimada / renda_mensal` | **Fração da renda consumida pela parcela** | Quanto maior, maior o risco | **Candidata principal**; seu IV é calculado no treino (Seção 5.3) |
-| `risco_renda_alta` | 1 se `comprometimento_renda > 0,30` (R8) | Endividamento excessivo | Acima de 30% → mais risco | Avaliada; redundante com a anterior |
-| `regiao` | UF → região do Brasil | 27 estados em 5 categorias | Possível diferença regional | Candidata categórica |
-| `renda_log`, `valor_solicitado_log` | `log1p` | Reduz assimetria | Mesma direção da original | Avaliadas; mesma informação das originais |
-| `faixa_idade`, `estabilidade_emprego`, `score_por_idade` | Quintis de idade; `tempo_emprego / idade`; `score / idade` | Faixa etária, proporção da vida no emprego atual, score relativo | Mais estabilidade → menos risco | Avaliadas; baixo poder preditivo |
+| `parcela_estimada` | `valor_solicitado / prazo_meses` | Parcela mensal aproximada, **sem juros** | Parcela maior pesa mais no orçamento | Candidata (confirmada pelo Boruta, IV = 0,1561) |
+| **`comprometimento_renda`** | `parcela_estimada / renda_mensal` | **Fração da renda consumida pela parcela** | Quanto maior, maior o risco | **Candidata principal**; maior IV numérico (0,4513) e confirmada pelo Boruta |
+| `risco_renda_alta` | 1 se `comprometimento_renda > 0,30` (R8) | Endividamento excessivo | Acima de 30% → mais risco | Candidata (confirmada pelo Boruta, IV = 0,3236) |
+| `regiao` | UF → região do Brasil | 27 estados em 5 categorias | Possível diferença regional | Descartada no treino por baixo poder preditivo (IV = 0,0044) |
+| `renda_log`, `valor_solicitado_log` | `log1p` | Reduz assimetria | Mesma direção da original | Candidatas (confirmadas pelo Boruta, IV = 0,2836 e 0,1022) |
+| `faixa_idade`, `estabilidade_emprego`, `score_por_idade` | Quintis de idade; `tempo_emprego / idade`; `score / idade` | Faixa etária, proporção da vida no emprego atual, score relativo | Mais estabilidade → menos risco | `estabilidade_emprego` e `score_por_idade` confirmadas; `faixa_idade` rejeitada pelo Boruta |
  
 **Hipótese central:** a inadimplência é mais explicada pela capacidade de pagamento (renda frente à parcela) do que pelo perfil demográfico. O gráfico de taxa por prazo (prazo curto = parcela alta = ~54% de inadimplência em 6 meses) foi o que reforçou a criação de `comprometimento_renda`.
  
@@ -227,18 +221,18 @@ Os outliers que sobram (renda e valor com cauda alta, score nos extremos) são l
  
 | Requisito | Decisão | Justificativa |
 |---|---|---|
-| Definir as variáveis | Candidatas numéricas: `score_credito`, `renda_mensal`, `comprometimento_renda`, `dividas_ativas`, `valor_solicitado`, `prazo_meses`, `tempo_emprego_anos`, `idade`. Candidatas categóricas: `escolaridade`, `finalidade`, `regiao` | Foram retiradas versões redundantes (`renda_log`, `valor_solicitado_log`, `parcela_estimada`, `risco_renda_alta`, `faixa_idade`, `score_por_idade`, `estabilidade_emprego`) para não instabilizar os coeficientes |
-| Excluir `estado` | `regiao` já resume a informação | R12 |
-| Checar colinearidade | VIF calculado no treino (VIF > 5 pede atenção) | Regressão logística interpretável exige variáveis pouco correlacionadas |
+| Definir as variáveis | Candidatas numéricas: todas as 15 colunas numéricas (originais e derivadas). Candidatas categóricas: `estado`, `escolaridade`, `finalidade`, `regiao` | Todas passam pelo filtro objetivo de seleção no conjunto de treino |
+| Checar colinearidade | VIF calculado no treino | Aponta forte colinearidade entre derivadas e originais (VIF > 5), justificando o uso da regularização L1 (Lasso) no modelo para encolher coeficientes |
+| Selecionar variáveis | **Somente no treino** (IV + Boruta, ver abaixo) | R9: evita vazamento. Selecionadas 13 numéricas e 1 categórica (`estado`, único atributo categórico com IV ≥ 0,02) |
 | Transformações | `StandardScaler` nas numéricas | Necessário para a penalização L1/L2 |
 | Categóricas | `OneHotEncoder(drop="first", handle_unknown="ignore")` | Interpretável na regressão, com categoria de referência |
 | Separar treino e teste | 70% / 30%, estratificado pelo alvo, semente fixa (`RANDOM_STATE = 108`) | Mantém a proporção de inadimplentes e torna o resultado reproduzível |
-| Selecionar variáveis | **Somente no treino** (IV + Boruta, ver abaixo) | R9: evita vazamento |
  
 **Regra de seleção:**
 - **IV** (Information Value, numéricas e categóricas): poder de separação entre bons e maus pagadores; abaixo de 0,02 a variável quase não separa as classes.
 - **Boruta** (numéricas): compara cada variável com versões embaralhadas dela mesma.
 - Numérica entra se for **confirmada** no Boruta com IV ≥ 0,02, ou **tentativa** com IV ≥ 0,05. Categórica entra se IV ≥ 0,02.
+- **Resultado da seleção no treino:** 13 numéricas selecionadas (`idade`, `renda_mensal`, `tempo_emprego_anos`, `score_credito`, `valor_solicitado`, `dividas_ativas`, `parcela_estimada`, `comprometimento_renda`, `renda_log`, `estabilidade_emprego`, `score_por_idade`, `valor_solicitado_log`, `risco_renda_alta`) e 1 categórica (`estado`). `prazo_meses` e `faixa_idade` foram rejeitadas pelo Boruta; `regiao`, `finalidade` e `escolaridade` foram rejeitadas pelo corte de IV (< 0,02).
 Todas as transformações ficam dentro de um `Pipeline`, então os parâmetros são aprendidos apenas no treino.
  
 **Onde:** seção *5. Preparação para modelagem* (5.1 a 5.3).
@@ -257,21 +251,14 @@ Todas as transformações ficam dentro de um `Pipeline`, então os parâmetros s
  
 **Efeito colateral de `class_weight="balanced"`:** as probabilidades ficam superestimadas (não calibradas). O notebook inclui um diagrama de confiabilidade para mostrar isso.
  
-#### 6.1 Teste de sensibilidade: caudas e não linearidades
+#### 6.1 Regularização L1 e Controle de Multicolinearidade
  
-A EDA levantou duas suspeitas: (1) os pontos de renda perto de 43–45 mil podem pesar demais nos coeficientes; (2) renda, prazo e dívidas têm efeito não linear. Para verificar, o notebook compara o modelo base com três variantes, usando **validação cruzada no treino** e os mesmos hiperparâmetros do modelo final (**o teste não entra**).
+Diante da forte correlação entre variáveis derivadas e originais diagnosticada pelo VIF na Seção 5.2, a busca em grade avaliou regularizações L1 (Lasso) e L2 (Ridge) com diferentes forças de penalização (`C`).
  
-| Variante | O que muda |
-|---|---|
-| Renda em log | `renda_mensal` → `log1p(renda_mensal)` |
-| Caudas limitadas | Cada numérica é cortada entre os percentis 1 e 99, aprendidos no treino de cada fold (sem vazamento) |
-| Prazo em faixas e dívidas 2+ | `prazo_meses` vira categoria (6, 12, 18, 24, 36+) e cria-se o indicador `dividas_2mais` |
+- **Melhor configuração encontrada:** `penalty = 'l1'` e `C = 0.1`, alcançando PR AUC média de **0,6895** na validação cruzada estratificada (5 folds) do treino.
+- **Função da regularização L1:** induz esparsidade e encolhimento de coeficientes redundantes. Isso confere estabilidade numérica e interpretabilidade aos coeficientes finais da regressão logística, permitindo ao algoritmo lidar diretamente com a multicolinearidade diagnosticada no VIF.
  
-**Regra de decisão (R14), definida antes de ver o resultado:** só se troca o modelo base por uma variante que ganhe mais que **1 desvio-padrão da PR AUC** entre os folds. Caso contrário, mantém-se o base, por ser mais simples e mais explicável.
- 
-**Como ler:** se as variantes ficarem dentro de 1 desvio, o modelo é **robusto** às caudas e a não linearidade não compensa a complexidade extra (bom argumento na apresentação). Se alguma ganhar claramente, a suspeita da EDA se confirmou e vira limitação e próximo passo. O notebook imprime a decisão automaticamente, mas o modelo final continua sendo o base: para adotar uma variante, é preciso alterar o pipeline.
- 
-**Onde:** seção *6. Modelagem*, subseção 6.1.
+**Onde:** seção *6. Modelagem: Regressão Logística* do notebook.
  
 ### Seção 7: Avaliação e interpretação
  
@@ -303,8 +290,6 @@ O modelo devolve probabilidades, e decidir aprovar ou negar exige um corte que d
  
 Tabela de decis com **Decil 1 = maior risco**, KS no teste e diagrama de confiabilidade.
  
-> Atenção: a primeira versão usava uma função (`gerar_tabela_decis_e_ks`) que numerava os decis no sentido contrário (Decil 1 = menor risco) e um texto com números ilustrativos (40–50%, < 1%). Ambos foram removidos: o notebook final usa `tabela_decis_risco`, com **Decil 1 = maior risco**.
- 
 **Onde:** seção *7. Avaliação e interpretação* (7.1 a 7.4).
  
 ### Seção 8: Conclusão
@@ -314,150 +299,36 @@ A seção *8. Conclusão* cobre os cinco pontos exigidos pelo README:
 1. **Principais padrões nos dados:** ~34% de inadimplentes; problemas de qualidade tratados; outliers legítimos mantidos e tetos de score e valor registrados como censura; inadimplência ligada à capacidade de pagamento.
 2. **Principais fatores:** `score_credito` (taxa de ~56% na faixa mais baixa contra ~16% na mais alta; Spearman ≈ −0,30), `dividas_ativas` (~27% com 0 ou 1 dívida contra ~60% com 7), `renda_mensal` (~53% contra ~21%; Spearman ≈ −0,23), prazo curto (~54% em 6 meses) e `valor_solicitado` (Spearman ≈ +0,14). `comprometimento_renda` resume a capacidade de pagamento (IV calculado no treino, Seção 5.3). Idade, escolaridade e finalidade têm relação fraca (4 a 8 p.p. de amplitude).
 3. **Resultados do modelo:** resumo numérico impresso automaticamente pela última célula do notebook.
-4. **Limitações:** ver [seção 8 deste documento](#8-limitações-e-cuidados-para-uso-real).
+4. **Limitações:** ver [seção 7 deste documento](#7-limitações-e-cuidados-para-uso-real).
 5. **Cuidados para uso real:** ver a mesma seção.
+
 ---
  
-## 6. Histórico: o que mudou em relação à primeira versão
+## 6. Resultados
+
+
+### 6.1 Modelo final
  
-O `notebook_final.ipynb` é a versão **organizada e corrigida**: o desenvolvimento exploratório da primeira versão (seleção na base toda, modelo WoE, calibração e corte no teste) foi removido, e o que valia foi reaproveitado. A tabela abaixo registra o que mudou, e é um bom roteiro para explicar o vazamento da primeira versão na apresentação.
- 
-| Aspecto | Primeira versão | Notebook final |
-|---|---|---|
-| Seleção de variáveis (IV + Boruta) | Na base inteira, **antes** do split (vazamento) | **Só no treino** |
-| Variáveis categóricas | Eliminadas da seleção sem aviso (o IV só cobria numéricas) | Avaliadas pelo IV e usadas se passarem o critério |
-| Colinearidade | Variáveis redundantes juntas (ex.: `renda_mensal` e `renda_log`) | Redundâncias removidas e VIF conferido |
-| Calibração | Ajustada e avaliada no mesmo teste | Apenas diagnosticada, sem ajuste |
-| Ponto de corte | Otimizado no teste | Escolhido por *out-of-fold* no treino, aplicado uma vez no teste |
-| Baseline | Não havia | Dummy (2 estratégias) e regra por score |
-| Interpretação das variáveis | Dicionário WoE de outro modelo, sem métricas | Coeficientes e odds ratios do modelo avaliado |
-| Teste | Usado em várias decisões | Usado uma vez, só para avaliar |
-| Boxplot de outliers | Painel extra plotando o alvo contra ele mesmo | Alvo fora da lista de numéricas; 7 painéis |
-| Confiabilidade das diferenças por faixa | Só barras de taxa, sem `n` nem intervalo | Tabela com `n` e IC de 95% por faixa |
-| Robustez a caudas e não linearidade | Não testada | Teste de sensibilidade (Seção 6.1), só no treino |
-| Comentários | Texto genérico | Leituras em primeira pessoa após cada análise |
- 
----
- 
-## 7. Resultados
- 
-### 7.1 Primeira versão (histórico; não está mais no notebook)
- 
-Regressão Logística da primeira versão, avaliada no teste (resultado histórico, a execução não está mais no notebook):
- 
-| Métrica | Valor aproximado |
-|---|---|
-| Acurácia balanceada | 0,73 |
-| ROC AUC | 0,80 |
-| PR AUC | 0,68 |
-| Recall | 0,73 |
-| Precision | 0,59 |
-| F1 | 0,65 |
-| MCC | 0,45 |
- 
-> Estes valores vieram de uma seleção de variáveis feita na base inteira e podem estar um pouco otimistas.
- 
-### 7.2 Modelo final (sem vazamento)
- 
-Preencha esta tabela com os valores impressos pela última célula do notebook após *Restart & Run All*:
+Valores obtidos na avaliação do conjunto de teste (resumo numérico e tabela comparativa):
  
 | Modelo | ROC AUC | PR AUC | Recall | Precision | F1 | MCC |
 |---|---|---|---|---|---|---|
-| Dummy (sempre aprovar) | | | | | | |
-| Dummy (estratificado) | | | | | | |
-| Regra: score < mediana | | | | | | |
-| **Regressão Logística final** | | | | | | |
+| Dummy (sempre aprovar) | 0,500 | 0,347 | 0,000 | 0,000 | 0,000 | 0,000 |
+| Dummy (estratificado) | 0,486 | 0,341 | 0,325 | 0,329 | 0,327 | -0,028 |
+| Regra: score < mediana | 0,698 | 0,519 | 0,721 | 0,481 | 0,577 | 0,293 |
+| **Regressão Logística final** | **0,800** | **0,684** | **0,714** | **0,587** | **0,644** | **0,430** |
  
 | Cenário de corte | Corte | Aprovados | Inadimplência dos aprovados | Lucro (R$, hipotético) |
 |---|---|---|---|---|
-| Aprovar todos | | | | |
-| Corte padrão 0,50 | | | | |
-| Corte ótimo (escolhido no treino) | | | | |
+| Aprovar todos | 1,01 | 1.260 | 34,7% | -R$ 1.089.600 |
+| Corte padrão 0,50 | 0,50 | 728 | 17,2% | -R$ 17.600 |
+| Corte ótimo (escolhido no treino) | 0,24 | 275 | 7,3% | R$ 124.000 |
  
-KS no teste: ____ %
- 
----
- 
-## 8. Limitações e cuidados para uso real
- 
-### Limitações da análise
- 
-- **Dados sintéticos:** os resultados valem para o exercício, não para uma carteira real.
-- **Divisão aleatória, sem dimensão temporal:** em produção seria necessária validação *out-of-time*.
-- **Viés de seleção:** só se conhece o desfecho das propostas aprovadas e acompanhadas, não o das recusadas.
-- **Premissas de limpeza:** trabalho a partir dos 14 anos (R5) e renda mínima de R$ 600 (R6) não vêm do enunciado, e a limpeza removeu ~15,7% das linhas.
-- **Censura:** score em 850 e valor em 50.000 são tetos; o modelo não distingue "50 mil" de "mais de 50 mil".
-- **`parcela_estimada` sem juros** e **custos hipotéticos** (R11).
-- **`class_weight="balanced"`** deixa as probabilidades superestimadas.
-- **Modelo linear:** a regressão logística assume relações lineares no log-odds e não captura interações automaticamente.
-### Cuidados para uso real
- 
-- Validar em dados mais recentes que os do treino e **monitorar deriva** (PSI) das variáveis e do desempenho; recalibrar quando necessário.
-- Definir o ponto de corte com os **custos reais** da operação e prever revisão humana para casos de fronteira.
-- Auditar **justiça e discriminação**: localização, idade e escolaridade podem funcionar como proxies de atributos protegidos.
-- Garantir **explicabilidade** ao cliente, conforme a LGPD e a regulação de crédito.
-- Usar o modelo como **apoio à decisão**, não como decisor único, e manter um modelo desafiante para comparação.
----
- 
-## 9. Checklist de entrega e roteiro da apresentação
- 
-### Checklist
- 
-- [ ] Notebook executado do início ao fim (*Restart & Run All*), sem erros
-- [ ] Tabela da seção 7.2 deste documento preenchida com os resultados reais
-- [ ] Texto da conclusão conferido contra os resultados da sua execução
-- [ ] Resultado da verificação de viés da limpeza anotado
-- [ ] Tabelas de `n` e IC por faixa conferidas (quais diferenças são confiáveis; `n` de dívidas 6 e 7)
-- [ ] Resultado do teste de sensibilidade (Seção 6.1) anotado e a decisão registrada
-- [ ] Blocos "💬 Minha leitura" conferidos contra os números reais e ajustados onde não baterem
-- [ ] Valores de lucro e custo (R11) confirmados ou marcados como hipotéticos
-- [ ] Repositório pessoal no GitHub criado, com `README.md`, `DOCUMENTACAO.md`, `requirements.txt` e o notebook
-- [ ] Histórico de commits seguindo Conventional Commits
-- [ ] Link do repositório enviado junto à entrega
-- [ ] Reunião individual no Microsoft Teams agendada com um monitor
-### Roteiro da apresentação (um item do README por bloco)
- 
-| Bloco exigido | O que mostrar |
-|---|---|
-| Problema e objetivo | Seção 1: alvo, tipo de problema, por que classificação |
-| Características dos dados | Dicionário, tamanho da base, ~34% de inadimplentes |
-| Problemas na preparação | Análise dos outliers (3 grupos), tabela de limpeza (Seção 3), a regra R5 que atingiu ~15% e a verificação de viés |
-| Descobertas da EDA | Capacidade de pagamento como eixo; variáveis fortes e fracas (amplitude das taxas); `n` e IC das faixas; prazo curto como motivo do `comprometimento_renda` |
-| Decisões tomadas | Variável derivada, remoção de redundâncias, exclusão de `estado`, seleção só no treino |
-| Modelo | Regressão Logística, grade de parâmetros, validação cruzada, PR AUC e teste de sensibilidade (Seção 6.1) |
-| Resultados | Tabela de baselines, coeficientes, cenários de corte |
-| Conclusões e limitações | Seção 8 deste documento |
- 
-**Ponto-chave a defender:** a apresentação deve mostrar que você entende as decisões. Esteja pronto para explicar por que a seleção original tinha vazamento e como a versão final o corrige.
+KS no teste: 45,4% (45,37%)
  
 ---
  
-## 10. Prática de Git: commits convencionais
- 
-Sugestão de histórico, no padrão do enunciado (mensagens sem acento, como no exemplo do README):
- 
-```text
-feat: inicia analise dos dados
-feat: adiciona entendimento do problema
-feat: realiza limpeza dos dados
-feat: adiciona analise exploratoria
-feat: adiciona analise de outliers e intervalos de confianca
-feat: cria atributos para o modelo
-feat: desenvolve modelo exploratorio
-fix: corrige vazamento na selecao de variaveis
-feat: adiciona teste de sensibilidade
-feat: adiciona baselines e avaliacao do modelo final
-feat: adiciona interpretacao dos coeficientes
-docs: adiciona conclusao e documentacao
-docs: adiciona apresentacao
-chore: adiciona requirements.txt
-```
- 
-Tipos usados: `feat` (nova etapa), `fix` (correção), `docs` (documentação) e `chore` (infraestrutura).
- 
----
- 
-## 11. Glossário
+## 7. Glossário
  
 | Termo | Significado |
 |---|---|
